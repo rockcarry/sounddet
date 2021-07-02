@@ -7,7 +7,7 @@
 #define SOUNDDET_TYPE_VOICE  (1 << 1)
 #define SOUNDDET_TYPE_BBCRY  (1 << 2)
 
-void*    sounddet_init(int samprate, int type);
+void*    sounddet_init(int samprate);
 void     sounddet_free(void *ctxt);
 uint32_t sounddet_run (void *ctxt, int16_t *pcm, int n);
 
