@@ -5,15 +5,15 @@
 #include "fft.h"
 #include "sounddet.h"
 
-#define ATTACH_THRESHOLD  700
-#define DETACH_THRESHOLD  500
+#define ATTACH_THRESHOLD  1000
+#define DETACH_THRESHOLD  800
 #define ATTACH_COUNTER    2
 #define DETACH_COUNTER    8
 #define DET_FREQ_START    100
 #define DET_FREQ_END      2500
 #define SAMPLE_RATE       8000
 #define FFT_LEN           512
-#define AMP_THRES_FACTOR  128
+#define AMP_THRES_FACTOR  1024
 #define FREQ_TO_IDX(samprate, freq) ((freq) * (FFT_LEN) / (samprate))
 
 typedef struct {
@@ -87,23 +87,23 @@ static void handle_freq_buf(int freq_buf[RINGBUF_SIZE][ITEM_FREQ_NUM], int *num_
 
 uint32_t sounddet_run(void *ctxt, int16_t *pcm, int n)
 {
-    int       val = 0, i, j, last_state;
+    int       avgamp = 0, i, j, last_state;
     SOUNDDET *det = (SOUNDDET*)ctxt;
     if (!det) return 0;
 
-    for (i=0; i<n; i++) val += abs(pcm[i]);
-    val /= n;
+    for (i=0; i<n; i++) avgamp += abs(pcm[i]);
+    avgamp /= n;
 
     last_state = det->attach_state;
     switch (det->attach_state) {
     case 0:
-        if (val > ATTACH_THRESHOLD) {
+        if (avgamp > ATTACH_THRESHOLD) {
             if (det->attach_counter < ATTACH_COUNTER) det->attach_counter++;
             else { det->attach_state = 1; det->attach_counter = 0; }
         } else det->attach_counter = 0;
         break;
     case 1:
-        if (val < DETACH_THRESHOLD) {
+        if (avgamp < DETACH_THRESHOLD) {
             if (det->attach_counter < DETACH_COUNTER) det->attach_counter++;
             else { det->attach_state = 0; det->attach_counter = 0; }
         } else det->attach_counter = 0;
@@ -123,32 +123,31 @@ uint32_t sounddet_run(void *ctxt, int16_t *pcm, int n)
         fft_execute(det->fft, data, data);
 
         for (j = 0, i = FREQ_TO_IDX(det->samprate, DET_FREQ_START); j < ITEM_FREQ_NUM && i <= FREQ_TO_IDX(det->samprate, DET_FREQ_END); i++) {
-            float amp = sqrt(data[i * 2 + 0] * data[i * 2 + 0] + data[i * 2 + 1] * data[i * 2 + 1]);
-            if (amp > val * AMP_THRES_FACTOR) {
+            float curamp = data[i * 2 + 0] * data[i * 2 + 0] + data[i * 2 + 1] * data[i * 2 + 1];
+            if (curamp > (float)avgamp * avgamp * AMP_THRES_FACTOR) {
                 int freq = det->samprate * i / FFT_LEN;
                 det->ringbuf_freq[det->ringbuf_idx][j++] = freq;
-//              printf("%4d ", freq);
+                printf("%4d ", freq);
             }
         }
         while (j<ITEM_FREQ_NUM) det->ringbuf_freq[det->ringbuf_idx][j++] = 0;
         det->ringbuf_idx++; det->ringbuf_idx %= 8;
-//      printf("\n\n"); fflush(stdout);
+        printf("\n\n"); fflush(stdout);
 
-        if (1) {
+        if (0) {
             int num_different, num_total, avg_dist, freq_min, freq_max;
             handle_freq_buf(det->ringbuf_freq, &num_different, &num_total, &avg_dist, &freq_min, &freq_max);
-            if (freq_max < 2000 && num_different >= 12 && num_total >= 16 && avg_dist > 20 && avg_dist < 80) {
+            if (freq_max < 2000 && num_different >= 12 && num_total >= 14 && avg_dist > 20) {
                 det->det_flags_cur |= SOUNDDET_TYPE_VOICE;
             }
+
             if (freq_min >= 1000 && num_different >= 1 && num_different <= 20 && avg_dist <= 100) {
                 det->det_flags_cur |= SOUNDDET_TYPE_BBCRY;
             }
-#if 0
             printf("num_different: %d\n", num_different);
             printf("num_total    : %d\n", num_total);
             printf("avg_dist     : %d\n", avg_dist );
             fflush(stdout);
-#endif
         }
     }
 
@@ -171,7 +170,7 @@ static void sounddet_wavin_callback(void *wavdev, void *cbctxt, void *buf, int l
             (ret & SOUNDDET_TYPE_BBCRY) ? "bbcry" : "-----");
         fflush(stdout);
     }
-//  if (1 || (ret & SOUNDDET_TYPE_SOUND)) wavdev_play(wavdev, buf, len);
+    if (1 || (ret & SOUNDDET_TYPE_SOUND)) wavdev_play(wavdev, buf, len);
 }
 
 int main(void)
